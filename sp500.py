@@ -1,843 +1,667 @@
-import streamlit as st
-import pandas as pd
+"""
+DeepS&P — LSTM forecasting and Monte Carlo simulation on 90+ years of S&P 500 data.
+
+Run:  streamlit run sp500.py
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import joblib
 import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
 import torch
 import torch.nn as nn
-import joblib
-import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta
 
-# ---------------------------------------------------------
-# Page Config
-# ---------------------------------------------------------
+import theme
+
+ASSETS = Path(__file__).parent / "assets"
+
 st.set_page_config(
-    page_title="DeepS&P | AI-Powered Market Analytics",
+    page_title="DeepS&P — LSTM Market Forecasting",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------
-# Custom CSS for Professional Styling
-# ---------------------------------------------------------
-st.markdown("""
-<style>
-    /* Main theme colors */
-    :root {
-        --primary-color: #1f77b4;
-        --secondary-color: #2ecc71;
-        --accent-color: #e74c3c;
-        --bg-dark: #0e1117;
-        --bg-card: #1a1d29;
-    }
-    
-    /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* Custom header styling */
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    
-    .main-header h1 {
-        color: white;
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin: 0;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-    }
-    
-    .main-header p {
-        color: rgba(255, 255, 255, 0.9);
-        font-size: 1.1rem;
-        margin-top: 0.5rem;
-    }
-    
-    /* Metric cards */
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        margin: 0.5rem 0;
-    }
-    
-    .metric-card h3 {
-        color: white;
-        font-size: 0.9rem;
-        font-weight: 500;
-        margin: 0 0 0.5rem 0;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    
-    .metric-card .value {
-        color: white;
-        font-size: 2rem;
-        font-weight: 700;
-        margin: 0;
-    }
-    
-    .metric-card .delta {
-        color: rgba(255, 255, 255, 0.8);
-        font-size: 0.9rem;
-        margin-top: 0.3rem;
-    }
-    
-    /* Info cards */
-    .info-card {
-        background: #1a1d29;
-        padding: 1.5rem;
-        border-radius: 10px;
-        border-left: 4px solid #667eea;
-        margin: 1rem 0;
-    }
-    
-    .info-card h4 {
-        color: #667eea;
-        margin-top: 0;
-    }
-    
-    /* Tabs styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: #1a1d29;
-        border-radius: 10px;
-        padding: 0.5rem;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        padding: 0 24px;
-        background-color: transparent;
-        border-radius: 8px;
-        color: #a0a0a0;
-        font-weight: 500;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-    }
-    
-    /* Button styling */
-    .stButton > button {
-        width: 100%;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 0.75rem 2rem;
-        font-weight: 600;
-        border-radius: 8px;
-        transition: all 0.3s ease;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(102, 126, 234, 0.4);
-    }
-    
-    /* Selectbox styling */
-    .stSelectbox > div > div {
-        background-color: #1a1d29;
-        border-radius: 8px;
-    }
-    
-    /* Slider styling */
-    .stSlider > div > div > div > div {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-    
-    /* DataFrame styling */
-    .dataframe {
-        border-radius: 10px;
-        overflow: hidden;
-    }
-    
-    /* Status badges */
-    .status-badge {
-        display: inline-block;
-        padding: 0.3rem 0.8rem;
-        border-radius: 20px;
-        font-size: 0.85rem;
-        font-weight: 600;
-        margin: 0.2rem;
-    }
-    
-    .status-success {
-        background-color: rgba(46, 204, 113, 0.2);
-        color: #2ecc71;
-    }
-    
-    .status-warning {
-        background-color: rgba(241, 196, 15, 0.2);
-        color: #f1c40f;
-    }
-    
-    .status-info {
-        background-color: rgba(52, 152, 219, 0.2);
-        color: #3498db;
-    }
-</style>
-""", unsafe_allow_html=True)
+P = theme.apply("deepsp")
 
-# ---------------------------------------------------------
-# Load Data with Error Handling
-# ---------------------------------------------------------
-@st.cache_data
+
+# ---------------------------------------------------------------------------
+# Data
+# ---------------------------------------------------------------------------
+
+@st.cache_data(show_spinner=False)
 def load_data():
-    try:
-        df = pd.read_csv("assets/SPX.csv", parse_dates=["Date"], index_col="Date").sort_index()
-        df_chart = df.loc["1930-01-01":"2020-12-31"].copy()
-        df_chart["SMA50"] = df_chart["Close"].rolling(50).mean()
-        df_chart["SMA200"] = df_chart["Close"].rolling(200).mean()
-        df_chart["Daily_Return"] = df_chart["Close"].pct_change()
-        df_chart["Volatility_30D"] = df_chart["Daily_Return"].rolling(30).std() * np.sqrt(252)
-        return df, df_chart
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        return None, None
+    df = pd.read_csv(
+        ASSETS / "SPX.csv", parse_dates=["Date"], index_col="Date"
+    ).sort_index()
 
-df, df_chart = load_data()
+    chart = df.loc["1930-01-01":"2020-12-31"].copy()
+    chart["SMA50"] = chart["Close"].rolling(50).mean()
+    chart["SMA200"] = chart["Close"].rolling(200).mean()
+    chart["Daily_Return"] = chart["Close"].pct_change()
+    chart["Volatility_30D"] = chart["Daily_Return"].rolling(30).std() * np.sqrt(252)
+    # Peak-to-trough drawdown, used by the analytics tab.
+    chart["Drawdown"] = chart["Close"] / chart["Close"].cummax() - 1.0
+    return df, chart
 
-if df is None or df_chart is None:
+
+try:
+    df, df_chart = load_data()
+except Exception as exc:  # missing or malformed CSV
+    st.error(f"Could not load `assets/SPX.csv` — {exc}")
     st.stop()
 
-# ---------------------------------------------------------
-# Load Model with Error Handling
-# ---------------------------------------------------------
-@st.cache_resource
-def load_model_and_scaler():
-    try:
-        scaler = joblib.load("assets/scaler_spx_gpu_safe.save")
-        
-        class StockLSTM(nn.Module):
-            def __init__(self, hidden_size=256, num_layers=3, dropout=0.2):
-                super().__init__()
-                self.lstm = nn.LSTM(
-                    input_size=1,
-                    hidden_size=hidden_size,
-                    num_layers=num_layers,
-                    dropout=dropout,
-                    batch_first=True
-                )
-                self.fc = nn.Linear(hidden_size, 1)
 
-            def forward(self, x):
-                out, _ = self.lstm(x)
-                return self.fc(out[:, -1])
+# ---------------------------------------------------------------------------
+# Model
+# ---------------------------------------------------------------------------
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = StockLSTM(hidden_size=256, num_layers=3, dropout=0.2).to(device)
-        model.load_state_dict(torch.load("assets/lstm_spx_gpu_safe.pth", map_location=device))
-        model.eval()
-        
-        return scaler, model, device
-    except Exception as e:
-        st.error(f"Error loading model: {str(e)}")
-        return None, None, None
+class StockLSTM(nn.Module):
+    def __init__(self, hidden_size: int = 256, num_layers: int = 3, dropout: float = 0.2):
+        super().__init__()
+        self.lstm = nn.LSTM(
+            input_size=1,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.fc = nn.Linear(hidden_size, 1)
 
-scaler, model, device = load_model_and_scaler()
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        return self.fc(out[:, -1])
 
-if scaler is None or model is None:
+
+@st.cache_resource(show_spinner=False)
+def load_model():
+    scaler = joblib.load(ASSETS / "scaler_spx_gpu_safe.save")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = StockLSTM().to(device)
+    model.load_state_dict(
+        torch.load(ASSETS / "lstm_spx_gpu_safe.pth", map_location=device)
+    )
+    model.eval()
+    return scaler, model, device
+
+
+try:
+    scaler, model, device = load_model()
+except Exception as exc:
+    st.error(f"Could not load the model from `assets/` — {exc}")
     st.stop()
 
-# ---------------------------------------------------------
+
+@st.cache_data(show_spinner=False)
+def predict_at(idx: int) -> float:
+    """Run the LSTM over every close up to (not including) `idx`.
+
+    Cached on the index because a full-history forward pass costs a second or
+    two on CPU and the page reruns on every widget interaction.
+    """
+    seq = df["Close"].values[:idx].reshape(-1, 1)
+    seq_scaled = scaler.transform(seq)
+    tensor = torch.tensor(seq_scaled, dtype=torch.float32).unsqueeze(0).to(device)
+    with torch.no_grad():
+        pred_scaled = model(tensor).item()
+    return float(scaler.inverse_transform([[pred_scaled]])[0][0])
+
+
+# ---------------------------------------------------------------------------
 # Sidebar
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+
+last_close = float(df_chart["Close"].iloc[-1])
+prev_close = float(df_chart["Close"].iloc[-2])
+change = last_close - prev_close
+change_pct = change / prev_close * 100
+device_name = "CUDA" if torch.cuda.is_available() else "CPU"
+
 with st.sidebar:
-    st.markdown("""
-    <div style='text-align: center; padding: 1rem 0;'>
-        <h1 style='font-size: 2rem; margin: 0;'>📈</h1>
-        <h2 style='font-size: 1.3rem; margin: 0.5rem 0;'>DeepS&P</h2>
-        <p style='color: #888; font-size: 0.9rem;'>AI-Powered Market Analytics</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Market Status
-    st.markdown("### 📊 Market Status")
-    last_close = df_chart["Close"].iloc[-1]
-    prev_close = df_chart["Close"].iloc[-2]
-    change = last_close - prev_close
-    change_pct = (change / prev_close) * 100
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Last Close", f"${last_close:.2f}", f"{change:.2f}")
-    with col2:
-        st.metric("Change %", f"{change_pct:.2f}%")
-    
-    st.markdown("---")
-    
-    # Quick Stats
-    st.markdown("### 📈 Quick Stats")
-    st.markdown(f"""
-    <div class='info-card'>
-        <strong>Data Range:</strong><br/>
-        {df_chart.index[0].strftime('%Y-%m-%d')} to {df_chart.index[-1].strftime('%Y-%m-%d')}
-    </div>
-    <div class='info-card'>
-        <strong>Total Trading Days:</strong><br/>
-        {len(df_chart):,}
-    </div>
-    <div class='info-card'>
-        <strong>Average Daily Volume:</strong><br/>
-        {df_chart['Volume'].mean():,.0f} shares
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Model Status
-    st.markdown("### 🤖 Model Status")
-    device_name = "GPU (CUDA)" if torch.cuda.is_available() else "CPU"
-    st.markdown(f"""
-    <span class='status-badge status-success'>● Active</span>
-    <span class='status-badge status-info'>{device_name}</span>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="tk-eyebrow">DeepS&amp;P</div>'
+        '<div style="font-size:1.05rem;font-weight:700;letter-spacing:-.02em;'
+        'margin:.3rem 0 1.2rem;">LSTM Market Forecasting</div>',
+        unsafe_allow_html=True,
+    )
 
-# ---------------------------------------------------------
-# Main Header
-# ---------------------------------------------------------
-st.markdown("""
-<div class='main-header'>
-    <h1>📈 DeepS&P LSTM Forecast Dashboard</h1>
-    <p>Advanced AI-powered S&P 500 price prediction and market analysis platform</p>
-</div>
-""", unsafe_allow_html=True)
+    theme.kv_panel(
+        "Series",
+        [
+            ("Index", "S&P 500 (SPX)"),
+            ("From", df_chart.index[0].strftime("%d %b %Y")),
+            ("To", df_chart.index[-1].strftime("%d %b %Y")),
+            ("Sessions", f"{len(df_chart):,}"),
+            ("Avg volume", f"{df_chart['Volume'].mean():,.0f}"),
+        ],
+    )
 
-# ---------------------------------------------------------
-# TABS
-# ---------------------------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs([
-    "🔮 LSTM Prediction",
-    "📉 Monte Carlo Simulation",
-    "📊 Market Analytics",
-    "ℹ️ Model Information"
-])
+    theme.kv_panel(
+        "Final bar",
+        [
+            ("Close", f"${last_close:,.2f}"),
+            ("Change", f"{change:+,.2f}"),
+            ("Change %", f"{change_pct:+.2f}%"),
+        ],
+    )
 
-# ---------------------------------------------------------
-# TAB 1 • LSTM Prediction
-# ---------------------------------------------------------
-with tab1:
-    st.markdown("## 🔮 AI-Powered Price Prediction")
-    st.markdown("Select a historical date to see the LSTM model's prediction accuracy")
-    
-    # Date Selection in columns
-    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-    
-    with col1:
-        st.markdown("### 📅 Select Date")
-    with col2:
-        year = st.selectbox("Year", list(range(1930, 2021)), index=90)
-    with col3:
-        month = st.selectbox("Month", list(range(1, 13)), index=0)
-    with col4:
-        day = st.selectbox("Day", list(range(1, 32)), index=0)
+    st.markdown(
+        theme.badge("Model loaded", "pos", dot=True)
+        + " "
+        + theme.badge(f"Compute · {device_name}", "accent"),
+        unsafe_allow_html=True,
+    )
 
-    try:
-        selected_date = pd.Timestamp(datetime(year, month, day))
-    except:
-        st.error("⚠️ Invalid date selected. Please choose a valid date.")
-        st.stop()
+    st.markdown(
+        '<div style="color:var(--faint);font-size:.75rem;line-height:1.6;'
+        'margin-top:1.4rem;">Research and education only. Nothing here is '
+        "investment advice.</div>",
+        unsafe_allow_html=True,
+    )
 
+
+# ---------------------------------------------------------------------------
+# Header
+# ---------------------------------------------------------------------------
+
+theme.hero(
+    "Deep<em>S&amp;P</em>",
+    "A three-layer LSTM trained on ninety years of S&P 500 closes, paired with "
+    "a Monte Carlo engine for forward path simulation.",
+    eyebrow="S&P 500 · Neural Forecasting",
+    meta=[
+        theme.badge("LSTM · 3 × 256", "accent"),
+        theme.badge(f"{len(df_chart):,} sessions"),
+        theme.badge("1930 – 2020"),
+        theme.badge(device_name, "pos", dot=True),
+    ],
+)
+
+tab_pred, tab_mc, tab_analytics, tab_model = st.tabs(
+    ["Prediction", "Monte Carlo", "Analytics", "Model"]
+)
+
+
+# ---------------------------------------------------------------------------
+# Prediction
+# ---------------------------------------------------------------------------
+
+with tab_pred:
+    theme.section(
+        "Point-in-time backtest",
+        "Pick any historical session. The model sees only the closes that "
+        "preceded it, then predicts that day's close — so the error below is "
+        "an out-of-sample read on a single bar.",
+    )
+
+    col_date, col_run = st.columns([2, 1])
+    with col_date:
+        selected = st.date_input(
+            "Session",
+            value=df_chart.index[-1].date(),
+            min_value=df.index[1].date(),
+            max_value=df_chart.index[-1].date(),
+        )
+    with col_run:
+        st.markdown('<div style="height:1.72rem"></div>', unsafe_allow_html=True)
+        st.caption("Non-trading dates snap back to the previous session.")
+
+    selected_date = pd.Timestamp(selected)
     if selected_date not in df.index:
-        dates_sorted = df.index.values
-        pos = np.searchsorted(dates_sorted, np.datetime64(selected_date))
+        pos = np.searchsorted(df.index.values, np.datetime64(selected_date))
         if pos == 0:
-            st.error("⚠️ No historical data available before this date.")
+            st.warning("No history available before that date.")
             st.stop()
         selected_date = df.index[pos - 1]
-        st.info(f"📍 Date adjusted to nearest trading day: **{selected_date.strftime('%B %d, %Y')}**")
+        st.caption(f"Snapped to {selected_date.strftime('%d %B %Y')}.")
 
     idx = df.index.get_loc(selected_date)
-    seq_len = idx
+    if idx <= 0:
+        st.warning("Not enough history before that date to run the model.")
+        st.stop()
 
-    st.markdown("---")
+    with st.spinner("Running the sequence through the network…"):
+        predicted = predict_at(idx)
 
-    # Prediction Section
-    if seq_len <= 0:
-        st.error("⚠️ Insufficient historical data for prediction.")
-    else:
-        # Make prediction
-        seq_data = df["Close"].values[:idx].reshape(-1, 1)
-        seq_scaled = scaler.transform(seq_data)
-        seq_tensor = torch.tensor(seq_scaled, dtype=torch.float32).unsqueeze(0).to(device)
+    actual = float(df.loc[selected_date, "Close"])
+    err = predicted - actual
+    err_pct = abs(err) / actual * 100
 
-        with torch.no_grad():
-            pred_scaled = model(seq_tensor).item()
+    theme.stat_row(
+        [
+            {
+                "label": "Actual close",
+                "value": f"${actual:,.2f}",
+                "delta": selected_date.strftime("%d %b %Y"),
+            },
+            {
+                "label": "LSTM prediction",
+                "value": f"${predicted:,.2f}",
+                "delta": "Sequence-to-point forecast",
+                "tone": "accent",
+            },
+            {
+                "label": "Absolute error",
+                "value": f"${abs(err):,.2f}",
+                "delta": f"{err:+,.2f} vs actual",
+            },
+            {
+                "label": "Error",
+                "value": f"{err_pct:.2f}%",
+                "delta": "Relative to actual close",
+                "tone": "pos" if err_pct < 2 else "warn" if err_pct < 5 else "neg",
+            },
+        ]
+    )
 
-        predicted_price = scaler.inverse_transform([[pred_scaled]])[0][0]
-        actual_price = df.loc[selected_date, "Close"]
-        error = abs(predicted_price - actual_price)
-        error_pct = (error / actual_price) * 100
-        
-        # Results Display
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("""
-            <div class='metric-card'>
-                <h3>Actual Close Price</h3>
-                <div class='value'>${:,.2f}</div>
-                <div class='delta'>Market Close on {}</div>
-            </div>
-            """.format(actual_price, selected_date.strftime('%b %d, %Y')), unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown("""
-            <div class='metric-card' style='background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);'>
-                <h3>LSTM Prediction</h3>
-                <div class='value'>${:,.2f}</div>
-                <div class='delta'>AI Model Forecast</div>
-            </div>
-            """.format(predicted_price), unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown("""
-            <div class='metric-card' style='background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);'>
-                <h3>Prediction Error</h3>
-                <div class='value'>{:.2f}%</div>
-                <div class='delta'>${:,.2f} difference</div>
-            </div>
-            """.format(error_pct, error), unsafe_allow_html=True)
+    theme.section("Price history", "Close with 50 and 200-session moving averages.")
 
-        st.markdown("---")
-
-        # Chart Section
-        st.markdown("### 📈 Interactive Price Chart")
-        
-        # Create subplot with volume
-        fig = make_subplots(
-            rows=2, cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.03,
-            row_heights=[0.7, 0.3],
-            subplot_titles=('S&P 500 Price & Moving Averages', 'Trading Volume')
-        )
-
-        # Price and MAs
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.04,
+        row_heights=[0.74, 0.26],
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df_chart.index,
+            y=df_chart["Close"],
+            name="Close",
+            line=dict(color=P["accent"], width=1.6),
+            hovertemplate="$%{y:,.2f}<extra>Close</extra>",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df_chart.index,
+            y=df_chart["SMA50"],
+            name="SMA 50",
+            line=dict(color=P["warn"], width=1, dash="dot"),
+            hovertemplate="$%{y:,.2f}<extra>SMA 50</extra>",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df_chart.index,
+            y=df_chart["SMA200"],
+            name="SMA 200",
+            line=dict(color=P["accent_2"], width=1, dash="dash"),
+            hovertemplate="$%{y:,.2f}<extra>SMA 200</extra>",
+        ),
+        row=1,
+        col=1,
+    )
+    if selected_date in df_chart.index:
         fig.add_trace(
             go.Scatter(
-                x=df_chart.index, y=df_chart["Close"], 
-                mode="lines", name="Close Price",
-                line=dict(color="#3498db", width=2),
-                hovertemplate='<b>Date</b>: %{x}<br><b>Close</b>: $%{y:,.2f}<extra></extra>'
-            ),
-            row=1, col=1
-        )
-        
-        fig.add_trace(
-            go.Scatter(
-                x=df_chart.index, y=df_chart["SMA50"],
-                mode="lines", name="SMA 50",
-                line=dict(color="#f39c12", width=1.5, dash="dash"),
-                hovertemplate='<b>SMA50</b>: $%{y:,.2f}<extra></extra>'
-            ),
-            row=1, col=1
-        )
-        
-        fig.add_trace(
-            go.Scatter(
-                x=df_chart.index, y=df_chart["SMA200"],
-                mode="lines", name="SMA 200",
-                line=dict(color="#2ecc71", width=1.5, dash="dot"),
-                hovertemplate='<b>SMA200</b>: $%{y:,.2f}<extra></extra>'
-            ),
-            row=1, col=1
-        )
-
-        # Highlight selected date
-        if selected_date in df_chart.index:
-            fig.add_trace(
-                go.Scatter(
-                    x=[selected_date], y=[df_chart.loc[selected_date, "Close"]],
-                    mode="markers+text", name="Selected Date",
-                    marker=dict(color="#e74c3c", size=15, symbol="diamond"),
-                    text=[f"${actual_price:.2f}"],
-                    textposition="top center",
-                    textfont=dict(color="white", size=12),
-                    hovertemplate='<b>Selected</b><br>Date: %{x}<br>Price: $%{y:,.2f}<extra></extra>'
+                x=[selected_date],
+                y=[actual],
+                name="Selected",
+                mode="markers",
+                marker=dict(
+                    color=P["bg"],
+                    size=11,
+                    line=dict(color=P["text"], width=2),
                 ),
-                row=1, col=1
-            )
-
-        # Volume
-        fig.add_trace(
-            go.Bar(
-                x=df_chart.index, y=df_chart["Volume"],
-                name="Volume", marker_color="#95a5a6",
-                hovertemplate='<b>Volume</b>: %{y:,.0f}<extra></extra>'
+                hovertemplate="$%{y:,.2f}<extra>Selected session</extra>",
             ),
-            row=2, col=1
+            row=1,
+            col=1,
+        )
+    fig.add_trace(
+        go.Bar(
+            x=df_chart.index,
+            y=df_chart["Volume"],
+            name="Volume",
+            marker_color="rgba(138,145,158,0.4)",
+            hovertemplate="%{y:,.0f}<extra>Volume</extra>",
+        ),
+        row=2,
+        col=1,
+    )
+    fig.update_yaxes(title_text="Price", row=1, col=1, type="log")
+    fig.update_yaxes(title_text="Volume", row=2, col=1)
+    theme.style_fig(fig, height=620)
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "Price axis is logarithmic — over ninety years a linear axis flattens "
+        "everything before 1990 into a single line."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Monte Carlo
+# ---------------------------------------------------------------------------
+
+@st.cache_data(show_spinner=False)
+def simulate(last_price: float, mu: float, sigma: float, days: int, paths: int, seed: int):
+    """Geometric random walk on daily returns drawn from the historical
+    distribution. Vectorised — one cumulative product, no Python loop."""
+    rng = np.random.default_rng(seed)
+    shocks = rng.normal(mu, sigma, size=(days - 1, paths))
+    walk = np.vstack([np.ones((1, paths)), np.cumprod(1 + shocks, axis=0)])
+    return last_price * walk
+
+
+with tab_mc:
+    theme.section(
+        "Forward path simulation",
+        "Draws daily returns from the historical mean and standard deviation, "
+        "then compounds them forward. It models dispersion, not direction.",
+    )
+
+    c1, c2, c3 = st.columns([2, 2, 1])
+    with c1:
+        num_paths = st.slider("Paths", 100, 2000, 500, 50)
+    with c2:
+        num_days = st.slider("Horizon (sessions)", 30, 365, 180, 15)
+    with c3:
+        seed = st.number_input("Seed", value=42, step=1)
+
+    if st.button("Run simulation", type="primary"):
+        st.session_state["mc"] = (int(num_paths), int(num_days), int(seed))
+
+    if "mc" in st.session_state:
+        n_paths, n_days, mc_seed = st.session_state["mc"]
+        returns = df_chart["Close"].pct_change().dropna()
+        mu, sigma = float(returns.mean()), float(returns.std())
+
+        with st.spinner("Simulating…"):
+            paths = simulate(last_close, mu, sigma, n_days, n_paths, mc_seed)
+
+        final = paths[-1]
+        p5, p95 = np.percentile(final, [5, 95])
+        median = float(np.median(final))
+        total_ret = median / last_close - 1
+
+        theme.stat_row(
+            [
+                {"label": "Start", "value": f"${last_close:,.2f}", "delta": "Final close"},
+                {
+                    "label": "Median outcome",
+                    "value": f"${median:,.2f}",
+                    "delta": f"{total_ret:+.1%} over {n_days} sessions",
+                    "tone": "accent",
+                },
+                {"label": "5th percentile", "value": f"${p5:,.2f}", "tone": "neg"},
+                {"label": "95th percentile", "value": f"${p95:,.2f}", "tone": "pos"},
+                {
+                    "label": "Dispersion",
+                    "value": f"${np.std(final):,.2f}",
+                    "delta": "Std. dev. of final price",
+                },
+            ]
         )
 
-        fig.update_layout(
-            height=700,
-            template="plotly_dark",
-            hovermode='x unified',
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            ),
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
+        # Fan chart. Every sampled path goes into a single trace separated by
+        # NaNs — 300 individual traces would make the figure unusable.
+        sample = min(120, n_paths)
+        xs, ys = [], []
+        steps = np.arange(n_days, dtype=float)
+        for i in range(sample):
+            xs.extend(steps.tolist() + [None])
+            ys.extend(paths[:, i].tolist() + [None])
+
+        p5_path = np.percentile(paths, 5, axis=1)
+        p95_path = np.percentile(paths, 95, axis=1)
+        median_path = np.median(paths, axis=1)
+
+        fig_mc = go.Figure()
+        fig_mc.add_trace(
+            go.Scatter(
+                x=steps, y=p95_path, name="95th percentile",
+                line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
+            )
         )
-        
-        fig.update_xaxes(showgrid=False, gridcolor='rgba(128,128,128,0.2)')
-        fig.update_yaxes(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
-
-        st.plotly_chart(fig, use_container_width=True)
-
-# ---------------------------------------------------------
-# TAB 2 • Monte Carlo Simulation
-# ---------------------------------------------------------
-with tab2:
-    st.markdown("## 📉 Monte Carlo Simulation")
-    st.markdown("Simulate thousands of potential future price paths using historical volatility")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        num_paths = st.slider("Number of Simulation Paths", 100, 2000, 500, 50)
-    with col2:
-        num_days = st.slider("Forecast Horizon (Days)", 30, 365, 180, 30)
-
-    if st.button("🚀 Run Simulation", use_container_width=True):
-        with st.spinner("Running Monte Carlo simulation..."):
-            last_price = df_chart["Close"].iloc[-1]
-            returns = df_chart["Close"].pct_change().dropna()
-            mu = returns.mean()
-            sigma = returns.std()
-
-            paths = np.zeros((num_days, num_paths))
-            paths[0] = last_price
-
-            for t in range(1, num_days):
-                shock = np.random.normal(mu, sigma, num_paths)
-                paths[t] = paths[t - 1] * (1 + shock)
-
-            # Statistics
-            final_prices = paths[-1]
-            mean_price = np.mean(final_prices)
-            median_price = np.median(final_prices)
-            std_price = np.std(final_prices)
-            percentile_5 = np.percentile(final_prices, 5)
-            percentile_95 = np.percentile(final_prices, 95)
-
-            # Display statistics
-            st.markdown("### 📊 Simulation Results")
-            
-            col1, col2, col3, col4, col5 = st.columns(5)
-            
-            with col1:
-                st.metric("Mean Price", f"${mean_price:,.2f}")
-            with col2:
-                st.metric("Median Price", f"${median_price:,.2f}")
-            with col3:
-                st.metric("Std Dev", f"${std_price:,.2f}")
-            with col4:
-                st.metric("5th Percentile", f"${percentile_5:,.2f}")
-            with col5:
-                st.metric("95th Percentile", f"${percentile_95:,.2f}")
-
-            st.markdown("---")
-
-            # Create visualization
-            fig_mc = go.Figure()
-
-            # Plot subset of paths
-            sample_paths = min(100, num_paths)
-            for i in range(sample_paths):
-                fig_mc.add_trace(
-                    go.Scatter(
-                        y=paths[:, i],
-                        mode="lines",
-                        line=dict(color='rgba(52, 152, 219, 0.3)', width=1),
-                        showlegend=False,
-                        hoverinfo='skip'
-                    )
-                )
-
-            # Add mean path
-            mean_path = np.mean(paths, axis=1)
-            fig_mc.add_trace(
-                go.Scatter(
-                    y=mean_path,
-                    mode="lines",
-                    name="Mean Path",
-                    line=dict(color="#e74c3c", width=3),
-                    hovertemplate='<b>Day</b>: %{x}<br><b>Mean Price</b>: $%{y:,.2f}<extra></extra>'
-                )
+        fig_mc.add_trace(
+            go.Scatter(
+                x=steps, y=p5_path, name="5–95% band",
+                line=dict(color="rgba(0,0,0,0)"),
+                fill="tonexty", fillcolor=P["accent_soft"], hoverinfo="skip",
             )
-
-            # Add percentile bands
-            p5_path = np.percentile(paths, 5, axis=1)
-            p95_path = np.percentile(paths, 95, axis=1)
-            
-            fig_mc.add_trace(
-                go.Scatter(
-                    y=p95_path,
-                    mode="lines",
-                    name="95th Percentile",
-                    line=dict(color="#2ecc71", width=2, dash="dash"),
-                    hovertemplate='<b>95th Percentile</b>: $%{y:,.2f}<extra></extra>'
-                )
+        )
+        fig_mc.add_trace(
+            go.Scatter(
+                x=xs, y=ys, mode="lines", name=f"{sample} sampled paths",
+                line=dict(color="rgba(138,145,158,0.20)", width=0.8),
+                hoverinfo="skip", connectgaps=False,
             )
-            
-            fig_mc.add_trace(
-                go.Scatter(
-                    y=p5_path,
-                    mode="lines",
-                    name="5th Percentile",
-                    line=dict(color="#f39c12", width=2, dash="dash"),
-                    fill='tonexty',
-                    fillcolor='rgba(52, 152, 219, 0.1)',
-                    hovertemplate='<b>5th Percentile</b>: $%{y:,.2f}<extra></extra>'
-                )
+        )
+        fig_mc.add_trace(
+            go.Scatter(
+                x=steps, y=median_path, name="Median path",
+                line=dict(color=P["accent"], width=2.4),
+                hovertemplate="$%{y:,.2f}<extra>Median</extra>",
             )
+        )
+        fig_mc.update_xaxes(title_text="Sessions ahead")
+        fig_mc.update_yaxes(title_text="Price")
+        theme.style_fig(fig_mc, height=520)
+        st.plotly_chart(fig_mc, use_container_width=True)
 
-            fig_mc.update_layout(
-                title=f"Monte Carlo Simulation: {num_paths} Paths over {num_days} Days",
-                xaxis_title="Days Ahead",
-                yaxis_title="Simulated Price ($)",
-                height=600,
-                template="plotly_dark",
-                hovermode='x unified',
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
+        theme.section("Terminal distribution")
+        fig_h = go.Figure(
+            go.Histogram(
+                x=final, nbinsx=60, marker_color=P["accent"],
+                marker_line=dict(width=0), opacity=0.85,
+                hovertemplate="$%{x:,.0f} · %{y} paths<extra></extra>",
             )
-            
-            fig_mc.update_xaxes(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
-            fig_mc.update_yaxes(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
-
-            st.plotly_chart(fig_mc, use_container_width=True)
-
-            # Distribution of final prices
-            st.markdown("### 📊 Distribution of Final Prices")
-            
-            fig_hist = go.Figure()
-            fig_hist.add_trace(
-                go.Histogram(
-                    x=final_prices,
-                    nbinsx=50,
-                    name="Final Price Distribution",
-                    marker_color="#3498db",
-                    hovertemplate='<b>Price Range</b>: $%{x:,.2f}<br><b>Count</b>: %{y}<extra></extra>'
-                )
+        )
+        for value, label, color in (
+            (p5, "5th", P["neg"]),
+            (median, "median", P["text"]),
+            (p95, "95th", P["pos"]),
+        ):
+            fig_h.add_vline(
+                x=value, line_dash="dot", line_color=color, line_width=1.5,
+                annotation_text=f"{label} ${value:,.0f}",
+                annotation_font_color=color, annotation_font_size=11,
             )
-            
-            fig_hist.add_vline(
-                x=mean_price, line_dash="dash", line_color="#e74c3c",
-                annotation_text=f"Mean: ${mean_price:,.2f}",
-                annotation_position="top right"
-            )
-            
-            fig_hist.update_layout(
-                title="Distribution of Final Simulated Prices",
-                xaxis_title="Final Price ($)",
-                yaxis_title="Frequency",
-                height=400,
-                template="plotly_dark",
-                showlegend=False,
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-            )
+        fig_h.update_xaxes(title_text="Price after horizon")
+        fig_h.update_yaxes(title_text="Paths")
+        theme.style_fig(fig_h, height=330, legend=False)
+        st.plotly_chart(fig_h, use_container_width=True)
+    else:
+        theme.empty_state(
+            "No simulation yet",
+            "Set the number of paths and the horizon, then run the simulation. "
+            "The seed makes each run reproducible.",
+        )
 
-            st.plotly_chart(fig_hist, use_container_width=True)
 
-# ---------------------------------------------------------
-# TAB 3 • Market Analytics
-# ---------------------------------------------------------
-with tab3:
-    st.markdown("## 📊 Market Analytics & Historical Data")
-    
-    # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        all_time_high = df_chart["Close"].max()
-        st.metric("All-Time High", f"${all_time_high:,.2f}")
-    
-    with col2:
-        all_time_low = df_chart["Close"].min()
-        st.metric("All-Time Low", f"${all_time_low:,.2f}")
-    
-    with col3:
-        avg_daily_return = df_chart["Daily_Return"].mean() * 100
-        st.metric("Avg Daily Return", f"{avg_daily_return:.3f}%")
-    
-    with col4:
-        current_volatility = df_chart["Volatility_30D"].iloc[-1] * 100
-        st.metric("30D Volatility", f"{current_volatility:.2f}%")
-    
-    st.markdown("---")
-    
-    # Data table with filters
-    st.markdown("### 📋 Historical Data Explorer")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        start_year = st.selectbox("From Year", list(range(1930, 2021)), index=0)
-    with col2:
-        end_year = st.selectbox("To Year", list(range(1930, 2021)), index=90)
-    
-    filtered_data = df_chart.loc[f"{start_year}-01-01":f"{end_year}-12-31"]
-    
+# ---------------------------------------------------------------------------
+# Analytics
+# ---------------------------------------------------------------------------
+
+with tab_analytics:
+    ann_vol = float(df_chart["Volatility_30D"].iloc[-1] * 100)
+    max_dd = float(df_chart["Drawdown"].min() * 100)
+    dd_date = df_chart["Drawdown"].idxmin()
+    best = df_chart["Daily_Return"].max() * 100
+    worst = df_chart["Daily_Return"].min() * 100
+
+    theme.section("Historical profile", "Whole-series statistics, 1930 to 2020.")
+    theme.stat_row(
+        [
+            {"label": "All-time high", "value": f"${df_chart['Close'].max():,.2f}"},
+            {"label": "All-time low", "value": f"${df_chart['Close'].min():,.2f}"},
+            {
+                "label": "Avg daily return",
+                "value": f"{df_chart['Daily_Return'].mean() * 100:.3f}%",
+                "delta": f"≈ {df_chart['Daily_Return'].mean() * 252 * 100:.1f}% annualised",
+                "tone": "pos",
+            },
+            {"label": "30d volatility", "value": f"{ann_vol:.1f}%", "delta": "Annualised"},
+            {
+                "label": "Max drawdown",
+                "value": f"{max_dd:.1f}%",
+                "delta": f"Trough {dd_date.strftime('%b %Y')}",
+                "tone": "neg",
+            },
+            {
+                "label": "Best / worst day",
+                "value": f"{best:+.1f}% / {worst:.1f}%",
+            },
+        ]
+    )
+
+    theme.section("Drawdown", "Distance below the running all-time high.")
+    fig_dd = go.Figure(
+        go.Scatter(
+            x=df_chart.index,
+            y=df_chart["Drawdown"] * 100,
+            fill="tozeroy",
+            fillcolor="rgba(255,107,107,0.16)",
+            line=dict(color=P["neg"], width=1.1),
+            name="Drawdown",
+            hovertemplate="%{y:.1f}%<extra>Drawdown</extra>",
+        )
+    )
+    fig_dd.update_yaxes(title_text="%", ticksuffix="%")
+    theme.style_fig(fig_dd, height=280, legend=False)
+    st.plotly_chart(fig_dd, use_container_width=True)
+
+    theme.section("Rolling 30-session volatility", "Annualised.")
+    fig_vol = go.Figure(
+        go.Scatter(
+            x=df_chart.index,
+            y=df_chart["Volatility_30D"] * 100,
+            line=dict(color=P["accent_2"], width=1.1),
+            name="Volatility",
+            hovertemplate="%{y:.1f}%<extra>Volatility</extra>",
+        )
+    )
+    fig_vol.update_yaxes(title_text="%", ticksuffix="%")
+    theme.style_fig(fig_vol, height=260, legend=False)
+    st.plotly_chart(fig_vol, use_container_width=True)
+
+    theme.section("Data explorer")
+    years = list(range(int(df_chart.index[0].year), int(df_chart.index[-1].year) + 1))
+    c1, c2 = st.columns(2)
+    with c1:
+        y0 = st.selectbox("From year", years, index=max(0, len(years) - 21))
+    with c2:
+        y1 = st.selectbox("To year", years, index=len(years) - 1)
+    if y1 < y0:
+        y0, y1 = y1, y0
+
+    subset = df_chart.loc[f"{y0}-01-01":f"{y1}-12-31"]
     st.dataframe(
-        filtered_data[["Open", "High", "Low", "Close", "Volume", "SMA50", "SMA200"]].style.format({
-            "Open": "${:,.2f}",
-            "High": "${:,.2f}",
-            "Low": "${:,.2f}",
-            "Close": "${:,.2f}",
-            "Volume": "{:,.0f}",
-            "SMA50": "${:,.2f}",
-            "SMA200": "${:,.2f}"
-        }),
+        subset[["Open", "High", "Low", "Close", "Volume", "SMA50", "SMA200"]],
         use_container_width=True,
-        height=400
+        height=380,
+        column_config={
+            col: st.column_config.NumberColumn(col, format="$%.2f")
+            for col in ("Open", "High", "Low", "Close", "SMA50", "SMA200")
+        }
+        | {"Volume": st.column_config.NumberColumn("Volume", format="%d")},
     )
-    
-    # Download button
-    csv = filtered_data.to_csv()
     st.download_button(
-        label="📥 Download Data as CSV",
-        data=csv,
-        file_name=f"spx_data_{start_year}_{end_year}.csv",
+        f"Download {y0}–{y1} as CSV",
+        data=subset.to_csv().encode(),
+        file_name=f"spx_{y0}_{y1}.csv",
         mime="text/csv",
-        use_container_width=True
     )
 
-# ---------------------------------------------------------
-# TAB 4 • Model Information
-# ---------------------------------------------------------
-with tab4:
-    st.markdown("## ℹ️ Model Architecture & Information")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("""
-        <div class='info-card'>
-            <h4>🧠 Neural Network Architecture</h4>
-            <ul>
-                <li><strong>Model Type:</strong> LSTM (Long Short-Term Memory)</li>
-                <li><strong>Hidden Size:</strong> 256 units</li>
-                <li><strong>Number of Layers:</strong> 3 stacked LSTM layers</li>
-                <li><strong>Dropout Rate:</strong> 0.2 (20%)</li>
-                <li><strong>Input Features:</strong> 1 (Close Price)</li>
-                <li><strong>Output:</strong> Next-day close price prediction</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("""
-        <div class='info-card'>
-            <h4>📊 Training Details</h4>
-            <ul>
-                <li><strong>Training Period:</strong> 1930–2020</li>
-                <li><strong>Data Points:</strong> 90+ years of daily data</li>
-                <li><strong>Normalization:</strong> MinMax Scaler</li>
-                <li><strong>Framework:</strong> PyTorch</li>
-                <li><strong>Device:</strong> {} capable</li>
-            </ul>
-        </div>
-        """.format("GPU (CUDA)" if torch.cuda.is_available() else "CPU"), unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-        <div class='info-card'>
-            <h4>🎯 Model Capabilities</h4>
-            <ul>
-                <li>Sequence-to-point prediction</li>
-                <li>Temporal pattern recognition</li>
-                <li>Long-term dependency learning</li>
-                <li>Market trend analysis</li>
-                <li>Volatility-aware forecasting</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("""
-        <div class='info-card'>
-            <h4>⚠️ Disclaimer</h4>
-            <p style='font-size: 0.9rem; color: #bbb;'>
-            This model is for educational and research purposes only. 
-            Past performance does not guarantee future results. Always consult 
-            with a qualified financial advisor before making investment decisions. 
-            This tool should not be used as the sole basis for any financial decisions.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Architecture Diagram
-    st.markdown("### 🏗️ LSTM Architecture Visualization")
-    
-    fig_arch = go.Figure()
-    
-    # Simple architecture visualization
-    layers = ["Input\n(Sequence)", "LSTM\nLayer 1", "LSTM\nLayer 2", "LSTM\nLayer 3", "Dense\nLayer", "Output\n(Price)"]
-    x_pos = list(range(len(layers)))
-    
-    fig_arch.add_trace(go.Scatter(
-        x=x_pos,
-        y=[0]*len(layers),
-        mode='markers+text',
-        marker=dict(size=60, color=['#3498db', '#9b59b6', '#9b59b6', '#9b59b6', '#e74c3c', '#2ecc71']),
-        text=layers,
-        textposition="middle center",
-        textfont=dict(color='white', size=10),
-        hoverinfo='skip'
-    ))
-    
-    # Add arrows
-    for i in range(len(layers)-1):
-        fig_arch.add_annotation(
-            x=x_pos[i+1], y=0,
-            ax=x_pos[i], ay=0,
-            xref='x', yref='y',
-            axref='x', ayref='y',
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=1,
-            arrowwidth=2,
-            arrowcolor='#7f8c8d'
+
+# ---------------------------------------------------------------------------
+# Model
+# ---------------------------------------------------------------------------
+
+with tab_model:
+    theme.section("Architecture and training")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        theme.kv_panel(
+            "Network",
+            [
+                ("Type", "Stacked LSTM"),
+                ("Hidden size", "256"),
+                ("Layers", "3"),
+                ("Dropout", "0.20"),
+                ("Input features", "1 (close)"),
+                ("Head", "Linear → 1"),
+                ("Parameters", f"{sum(p.numel() for p in model.parameters()):,}"),
+            ],
         )
-    
-    fig_arch.update_layout(
-        height=200,
-        showlegend=False,
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1, 1]),
-        template="plotly_dark",
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=20, r=20, t=20, b=20)
+        theme.panel(
+            "How a prediction is made",
+            "<p>The full sequence of closes preceding the selected session is "
+            "min-max scaled, pushed through the three LSTM layers, and the final "
+            "hidden state is mapped to a single value by the dense head. That "
+            "value is inverse-transformed back into dollars.</p>"
+            "<p>Because the model never sees the target bar, the error shown on "
+            "the Prediction tab is genuinely out-of-sample for that date.</p>",
+        )
+    with c2:
+        theme.kv_panel(
+            "Training",
+            [
+                ("Period", "1930 – 2020"),
+                ("Observations", f"{len(df):,}"),
+                ("Scaling", "MinMax"),
+                ("Framework", f"PyTorch {torch.__version__.split('+')[0]}"),
+                ("Inference device", device_name),
+            ],
+        )
+        theme.panel(
+            "Limits worth knowing",
+            theme.bullets(
+                [
+                    "**Univariate. **Close price only — no volume, macro, or "
+                    "cross-asset inputs.",
+                    "**Single step. **It predicts one bar ahead, not a path. "
+                    "Chaining its own outputs would compound error quickly.",
+                    "**Regime-bound. **Trained through 2020; the distribution it "
+                    "learned may not describe the market you trade.",
+                    "**Not advice. **This is a research artefact. Do not size "
+                    "positions with it.",
+                ]
+            ),
+        )
+
+    theme.section("Forward pass")
+    layers = ["Sequence", "LSTM ×256", "LSTM ×256", "LSTM ×256", "Dense", "Close"]
+    colors = [P["faint"], P["accent"], P["accent"], P["accent"], P["accent_2"], P["pos"]]
+    fig_arch = go.Figure()
+    fig_arch.add_trace(
+        go.Scatter(
+            x=list(range(len(layers))),
+            y=[0] * len(layers),
+            mode="markers+text",
+            marker=dict(size=64, color=P["surface"], line=dict(color=colors, width=2)),
+            text=layers,
+            textposition="middle center",
+            textfont=dict(color=P["text"], size=10, family="Inter"),
+            hoverinfo="skip",
+        )
     )
-    
+    for i in range(len(layers) - 1):
+        fig_arch.add_annotation(
+            x=i + 1, y=0, ax=i, ay=0,
+            xref="x", yref="y", axref="x", ayref="y",
+            showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.2,
+            arrowcolor=P["faint"], standoff=36, startstandoff=36,
+        )
+    fig_arch.update_xaxes(visible=False, range=[-0.6, len(layers) - 0.4])
+    fig_arch.update_yaxes(visible=False, range=[-1, 1])
+    theme.style_fig(fig_arch, height=170, legend=False)
     st.plotly_chart(fig_arch, use_container_width=True)
 
-# ---------------------------------------------------------
-# Footer
-# ---------------------------------------------------------
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #888; padding: 2rem 0;'>
-    <p>DeepS&P LSTM Forecast Dashboard | Powered by PyTorch & Streamlit</p>
-    <p style='font-size: 0.8rem;'>© 2024 Advanced Financial Analytics Platform</p>
-</div>
-""", unsafe_allow_html=True)
+
+theme.footer(
+    '<b>DeepS&amp;P</b> · LSTM + Monte Carlo on 90 years of S&amp;P 500 data',
+    "PyTorch · Streamlit · Plotly — research use only",
+)

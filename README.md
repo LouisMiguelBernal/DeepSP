@@ -1,50 +1,34 @@
 # DeepS&P
 
-S&P 500 forecasting platform — a three-layer LSTM trained on ninety years of daily
-closes, paired with a Monte Carlo engine for forward path simulation.
+S&P 500 forecasting dashboard: a three-layer PyTorch LSTM trained on ninety years of
+daily closes, a Monte Carlo engine for forward path simulation, and market analytics.
+
+Version 2 is a Next.js app. The model ran once in PyTorch and its predictions ship as
+static JSON, so the site needs no Python server and every interaction runs in the browser.
 
 ---
 
 ## Run it locally
 
-Double-click `run.bat`, or from a terminal in the project folder:
-
 ```bash
-run.bat
+npm install
+npm run dev        # http://localhost:3200
 ```
 
-First run creates a virtual environment and installs PyTorch (CPU build, ~200 MB),
-so give it a few minutes. After that it launches straight to
-**http://localhost:8502**.
+Production build: `npm run build && npm start`. Tests: `npm test`. Types: `npm run typecheck`.
 
-Prefer to drive it yourself:
-
-```bash
-python -m venv .venv && .venv\Scripts\activate && pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install -r requirements.txt && streamlit run sp500.py
-```
-
-The first page load takes roughly a minute — importing PyTorch and unpickling the
-scaler is slow, and both are cached afterwards.
+Deploy: import the repo in Vercel. No environment variables are needed.
 
 ---
 
 ## What's in it
 
-**Prediction** — pick any session between 1930 and 2020. The model sees only the
-closes that preceded it and predicts that day's close, so the error is a genuine
-out-of-sample read on a single bar. Shown against the full price history on a log
-axis, with the selected session marked.
-
-**Monte Carlo** — draws daily returns from the historical mean and standard
-deviation and compounds them forward. Fan chart with a 5–95% band and a median
-path, plus the terminal price distribution. Seeded, so a run is reproducible.
-
-**Analytics** — all-time highs and lows, average and annualised returns, rolling
-30-session volatility, peak-to-trough drawdown, and a filterable data explorer
-with CSV export.
-
-**Model** — architecture, parameter count, training details, and an honest list of
-what the model cannot do.
+| Tab | What it does |
+|---|---|
+| **Prediction** | Pick any session from 1928 to 2020. The model saw only the closes before it; you get its prediction, the actual close and the error. Price history on a log axis with 50/200-session averages, range presets and the model line on the 5Y/1Y views. |
+| **Monte Carlo** | Seeded geometric random walk on daily returns drawn from the historical mean and standard deviation. Up to 2,000 paths × 365 sessions, fan chart with a 5–95% band, terminal distribution, share of paths ending below the start. |
+| **Analytics** | All-time high/low, average and annualised return, 30-session volatility, max drawdown, best/worst day, drawdown and volatility charts, and a data explorer with CSV export that includes the model's prediction per session. |
+| **Model** | Architecture, parameter count, measured accuracy and the limits of the model. |
 
 ---
 
@@ -52,22 +36,36 @@ what the model cannot do.
 
 | | |
 |---|---|
-| Type | Stacked LSTM |
-| Hidden size | 256 |
-| Layers | 3 |
-| Dropout | 0.20 |
-| Input | 1 feature (close price) |
+| Type | Stacked LSTM, 3 layers × 256 hidden, dropout 0.20 |
+| Input | 1 feature (close), min-max scaled |
 | Head | Linear → 1 |
-| Scaling | MinMax |
-| Training period | 1930 – 2020 |
+| Parameters | 1,318,145 |
+| Data | 23,323 sessions, Dec 1927 – Nov 2020 |
 | Framework | PyTorch |
 
-It is univariate and single-step: close price in, one bar ahead out. It does not
-produce a path, and chaining its own outputs would compound error quickly. It was
-trained through 2020, so the distribution it learned may not describe the market
-you are looking at.
+Measured on 2016–2020 (`model/export_predictions.py` prints these):
 
-Research and educational use only. Nothing here is investment advice.
+| Metric | Value |
+|---|---|
+| MAPE | 0.83% |
+| Median absolute % error | 0.53% |
+| Direction hit rate | 50.2% |
+
+The low error mostly tracks the previous close; direction is a coin flip. It is a
+univariate, single-step model trained through 2020. Research and education only,
+not investment advice.
+
+---
+
+## Regenerate the predictions
+
+```bash
+pip install torch joblib scikit-learn pandas numpy
+python model/export_predictions.py     # writes public/data/spx.json
+```
+
+The network is causal, so one forward pass over the whole series yields its output after
+every prefix, which is the same number the per-date pass in v1 produced.
 
 ---
 
@@ -75,28 +73,12 @@ Research and educational use only. Nothing here is investment advice.
 
 ```
 DeepSP/
-├── .streamlit/config.toml       Base theme
-├── assets/
-│   ├── SPX.csv                  Daily OHLCV, 1930–2020
-│   ├── lstm_spx_gpu_safe.pth    Trained weights
-│   └── scaler_spx_gpu_safe.save Fitted MinMax scaler
-├── sp500.py                     The application
-├── sp_model.ipynb               Training notebook
-├── theme.py                     Shared design system
-├── requirements.txt
-└── run.bat                      One-command local launch
+├── model/
+│   ├── assets/                  SPX.csv, trained weights, fitted scaler
+│   ├── export_predictions.py    PyTorch → public/data/spx.json
+│   └── sp_model.ipynb           Training notebook
+├── public/data/spx.json         Closes, volume and predictions (0.8 MB)
+├── src/app/                     Next.js App Router
+├── src/components/              Dashboard and the SVG chart
+└── src/lib/                     Series maths, Monte Carlo, tests
 ```
-
-`theme.py` is shared verbatim with [QuantMaven](https://github.com/LouisMiguelBernal/QuantMaven)
-and [GiftxAI](https://github.com/LouisMiguelBernal/GiftxAI) — one visual language,
-one accent hue per project.
-
----
-
-## Known wrinkle
-
-The scaler was pickled under scikit-learn 1.5 and will emit an
-`InconsistentVersionWarning` on newer versions. `MinMaxScaler` stores only the
-fitted min and scale arrays and transforms identically across these versions, so
-the warning is safe to ignore. Re-fit and re-save it from `sp_model.ipynb` if you
-would rather it went away.

@@ -12,7 +12,7 @@ export const metadata: Metadata = {
     'A three-layer PyTorch LSTM trained on S&P 500 closes from 1930 to 2020, with point-in-time backtests, a Monte Carlo path simulator and market analytics, all in the browser.',
 }
 
-export const viewport: Viewport = { themeColor: '#07090E', width: 'device-width', initialScale: 1 }
+export const viewport: Viewport = { themeColor: '#F6E4D6', width: 'device-width', initialScale: 1 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

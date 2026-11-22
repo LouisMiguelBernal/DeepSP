@@ -9,12 +9,12 @@ import {
 import { simulate, bands, terminal, quantile, type Sim } from '@/lib/mc'
 
 const C = {
-  accent: '#4C8DFF',
-  accent2: '#9B7BFF',
-  warn: '#F2B544',
-  pos: '#2ECC8F',
-  neg: '#FF6B6B',
-  faint: '#5B6475',
+  accent: '#8E1B3B', // claret
+  accent2: '#0E6E78', // teal
+  warn: '#9A6205',
+  pos: '#1F7A4D',
+  neg: '#B4361F',
+  faint: '#A39385',
 }
 
 const TABS = ['Prediction', 'Monte Carlo', 'Analytics', 'Model'] as const
@@ -54,7 +54,11 @@ export default function Dashboard() {
     <>
       <header className="hero">
         <div className="wrap">
-          <div className="eyebrow"><span className="dot" /> S&amp;P 500 · Neural forecasting</div>
+          <div className="mast">
+            <img src="/brand/deepsp.svg" alt="DeepS&amp;P" />
+            <span className="mast-d">Est. 1928 · S&amp;P 500 · Neural forecasting</span>
+          </div>
+          <div className="eyebrow"><span className="dot" /> The forecasting desk</div>
           <h1>Deep<em>S&amp;P</em></h1>
           <p className="lede">
             A three-layer LSTM trained on ninety years of S&amp;P 500 closes, paired with a Monte Carlo engine
@@ -162,13 +166,13 @@ function Prediction({ s }: { s: Series }) {
     const [ax, ay] = downsample(s.t, s.sma50, start, n, B)
     const [bx, by] = downsample(s.t, s.sma200, start, n, B)
     const out: Line[] = [
-      { name: 'Close', x: cx, y: cy, color: C.accent, width: 1.6 },
+      { name: 'Close', x: cx, y: cy, color: C.accent2, width: 1.6 },
       { name: 'SMA 50', x: ax, y: ay, color: C.warn, width: 1, dash: '2 3' },
-      { name: 'SMA 200', x: bx, y: by, color: C.accent2, width: 1, dash: '6 4' },
+      { name: 'SMA 200', x: bx, y: by, color: '#5E5249', width: 1, dash: '6 4' },
     ]
     if (range === '1y' || range === '5y') {
       const [px, py] = downsample(s.t, s.pred, start, n, B)
-      out.push({ name: 'LSTM', x: px, y: py, color: C.pos, width: 1.2 })
+      out.push({ name: 'LSTM', x: px, y: py, color: C.accent, width: 1.4 })
     }
     return out
   }, [s, start, n, range])
@@ -254,7 +258,7 @@ function Prediction({ s }: { s: Series }) {
             ariaLabel="S&P 500 close price history with moving averages"
           />
           <Chart
-            bars={{ x: vol.x, y: vol.y, color: 'rgba(138,145,158,0.45)', name: 'Volume' }}
+            bars={{ x: vol.x, y: vol.y, color: 'rgba(43,38,34,0.28)', name: 'Volume' }}
             height={110}
             xKind="time"
             yFmt={v => (v >= 1e9 ? (v / 1e9).toFixed(1) + 'B' : v >= 1e6 ? (v / 1e6).toFixed(0) + 'M' : v.toFixed(0))}
@@ -349,10 +353,10 @@ function MonteCarlo({ s }: { s: Series }) {
           />
           <Section title="Fan chart" sub="5–95% band, median path and 120 sampled paths.">
             <div className="card">
-              <Legend items={[{ name: 'Median', color: C.accent }, { name: '5–95% band', color: 'rgba(76,141,255,0.35)' }, { name: 'Sampled paths', color: C.faint }]} />
+              <Legend items={[{ name: 'Median', color: C.accent }, { name: '5–95% band', color: 'rgba(142,27,59,0.3)' }, { name: 'Sampled paths', color: C.faint }]} />
               <Chart
-                band={{ x: view.x, lo: view.b.p5, hi: view.b.p95, fill: 'rgba(76,141,255,0.14)', name: '95/5%' }}
-                paths={{ x: view.x, ys: view.ys, color: 'rgba(138,145,158,0.18)' }}
+                band={{ x: view.x, lo: view.b.p5, hi: view.b.p95, fill: 'rgba(142,27,59,0.12)', name: '95/5%' }}
+                paths={{ x: view.x, ys: view.ys, color: 'rgba(43,38,34,0.12)' }}
                 lines={[{ name: 'Median', x: view.x, y: view.b.p50, color: C.accent, width: 2.4 }]}
                 height={420}
                 xKind="number"
@@ -365,10 +369,10 @@ function MonteCarlo({ s }: { s: Series }) {
           <Section title="Terminal distribution" sub={`Spread of final prices. Standard deviation ${fmtUsd(view.sd)}.`}>
             <div className="card">
               <Chart
-                bars={{ x: view.hx, y: view.hy, color: 'rgba(76,141,255,0.8)', name: 'Paths' }}
+                bars={{ x: view.hx, y: view.hy, color: 'rgba(142,27,59,0.75)', name: 'Paths' }}
                 vlines={[
                   { x: view.p5, color: C.neg, label: '5th' },
-                  { x: view.p50, color: '#E6EAF2', label: 'median' },
+                  { x: view.p50, color: '#2B2622', label: 'median' },
                   { x: view.p95, color: C.pos, label: '95th' },
                 ]}
                 height={280}
@@ -451,7 +455,7 @@ function Analytics({ s }: { s: Series }) {
         <Section title="Drawdown" sub="Distance below the running all-time high.">
           <div className="card">
             <Chart
-              lines={[{ name: 'Drawdown', x: st.ddx, y: st.ddy, color: C.neg, width: 1.1, fillTo: 0, fill: 'rgba(255,107,107,0.16)' }]}
+              lines={[{ name: 'Drawdown', x: st.ddx, y: st.ddy, color: C.neg, width: 1.1, fillTo: 0, fill: 'rgba(180,54,31,0.14)' }]}
               height={240}
               xKind="time"
               yFmt={v => v.toFixed(0) + '%'}

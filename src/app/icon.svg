@@ -1,1 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#07090E"/><path d="M10 44 L22 34 L30 38 L42 22 L54 16" fill="none" stroke="#4C8DFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="54" cy="16" r="4" fill="#9B7BFF"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="DeepS&amp;P">
+  <title>DeepS&amp;P</title>
+  <rect x="4" y="4" width="88" height="88" fill="#F6E4D6"/>
+  <path d="M18 14 H44 C66 14 80 29 80 48 C80 67 66 82 44 82 H18 Z" fill="none" stroke="#2B2622" stroke-width="6"/>
+  <path d="M27 62 L36 55 L42 58 L50 46" fill="none" stroke="#0E6E78" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M50 46 L68 30 M50 46 L70 41 M50 46 L69 53" fill="none" stroke="#8E1B3B" stroke-width="3" stroke-linecap="round" opacity="0.9"/>
+  <circle cx="50" cy="46" r="3.6" fill="#8E1B3B"/>
+</svg>
